@@ -213,7 +213,7 @@ class IOConnection implements IOCallback {
   public static void setSslContext(SSLContext sslContext) {
     IOConnection.sslContext = sslContext;
   }
-  
+
   /**
    * Get the socket factory used for SSL connections.
    * 
@@ -487,7 +487,7 @@ class IOConnection implements IOCallback {
     if (heartbeatTimeoutTask != null) {
       heartbeatTimeoutTask.cancel();
     }
-    if(getState() != STATE_INVALID) {
+    if (getState() != STATE_INVALID) {
       heartbeatTimeoutTask = new HearbeatTimeoutTask();
       backgroundTimer.schedule(heartbeatTimeoutTask, closingTimeout
           + heartbeatTimeout);
@@ -520,34 +520,11 @@ class IOConnection implements IOCallback {
    * {@link IOTransport} calls this when a connection is established.
    */
   public synchronized void transportConnected() {
-    setState(STATE_READY);
     if (reconnectTask != null) {
       reconnectTask.cancel();
       reconnectTask = null;
     }
     resetTimeout();
-    if (transport.canSendBulk()) {
-      ConcurrentLinkedQueue<String> outputBuffer = this.outputBuffer;
-      this.outputBuffer = new ConcurrentLinkedQueue<String>();
-      try {
-        // DEBUG
-        String[] texts = outputBuffer.toArray(new String[outputBuffer
-            .size()]);
-        logger.info("Bulk start:");
-        for (String text : texts) {
-          logger.info("> " + text);
-        }
-        logger.info("Bulk end");
-        // DEBUG END
-        transport.sendBulk(texts);
-      } catch (IOException e) {
-        this.outputBuffer = outputBuffer;
-      }
-    } else {
-      String text;
-      while ((text = outputBuffer.poll()) != null)
-        sendPlain(text);
-    }
     this.keepAliveInQueue = false;
   }
 
@@ -634,6 +611,7 @@ class IOConnection implements IOCallback {
     case IOMessage.TYPE_CONNECT:
       try {
         if (firstSocket != null && "".equals(message.getEndpoint())) {
+          setState(STATE_READY);
           if (firstSocket.getNamespace().equals("")) {
             firstSocket.getCallback().onConnect();
           } else {
@@ -642,6 +620,8 @@ class IOConnection implements IOCallback {
                 firstSocket.getNamespace(), "");
             sendPlain(connect.toString());
           }
+          // should flush after connecting to namespace
+          flushBuffer();
         } else {
           findCallback(message).onConnect();
         }
@@ -755,6 +735,34 @@ class IOConnection implements IOCallback {
   }
 
   /**
+   * Flushes the buffer data.
+   */
+  private synchronized void flushBuffer() {
+    if (transport.canSendBulk()) {
+      ConcurrentLinkedQueue<String> outputBuffer = this.outputBuffer;
+      this.outputBuffer = new ConcurrentLinkedQueue<String>();
+      try {
+        // DEBUG
+        String[] texts = outputBuffer.toArray(new String[outputBuffer
+            .size()]);
+        logger.info("Bulk start:");
+        for (String text : texts) {
+          logger.info("> " + text);
+        }
+        logger.info("Bulk end");
+        // DEBUG END
+        transport.sendBulk(texts);
+      } catch (IOException e) {
+        this.outputBuffer = outputBuffer;
+      }
+    } else {
+      String text;
+      while ((text = outputBuffer.poll()) != null)
+        sendPlain(text);
+    }
+  }
+
+  /**
    * forces a reconnect. This had become useful on some android devices which
    * do not shut down TCP-connections when switching from HSDPA to Wifi
    */
@@ -826,26 +834,26 @@ class IOConnection implements IOCallback {
    */
   public void emit(SocketIO socket, String event, IOAcknowledge ack, Object... args) {
     try {
-      
       JsonArray jarray = new JsonArray();
-      
-      for ( Object arg : args ) {
-        if ( arg instanceof String ) {
-          jarray.add( new JsonParser().parse( (String) arg ).getAsJsonObject() );
+
+      for (Object arg : args) {
+        if (arg instanceof JsonElement) {
+          jarray.add((JsonElement)arg);
+        } else if (arg instanceof String) {
+          jarray.add(new JsonParser().parse((String)arg));
         } else {
-          error( new SocketIOException("a non-string message received: " + arg.toString() ) );
+          error(new SocketIOException("a non-json message received: " + arg.toString()));
         }
       }
-      
-      
+
       JsonObject jobj = new JsonObject();
       jobj.add("name", new JsonPrimitive(event));
       jobj.add("args", jarray);
-      
+
       IOMessage message = new IOMessage(IOMessage.TYPE_EVENT, socket.getNamespace(), jobj.toString());
       synthesizeAck(message, ack);
       sendPlain(message.toString());
-      
+
     } catch (JsonParseException e) {
       error(new SocketIOException("Error while emitting an event. Make sure you only try to send arguments, which can be serialized into JSON."));
     }
@@ -877,7 +885,8 @@ class IOConnection implements IOCallback {
    *            the new state
    */
   private synchronized void setState(int state) {
-    this.state = state;
+    if (getState() != STATE_INVALID)
+      this.state = state;
   }
 
   /**

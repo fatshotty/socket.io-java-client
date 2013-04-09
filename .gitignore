@@ -6,3 +6,4 @@ target/
 bin/
 .externalToolBuilders/
 .settings/
+node_modules/
