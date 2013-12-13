@@ -18,6 +18,21 @@
   <version>0.2.1</version> <!-- the desidered version -->
 </dependency>
 ```
+###### In your `build.gradle`
+```closure
+
+repositories {
+    mavenCentral()
+    maven { url 'http://audiobox.keytwo.net' }
+}
+
+dependencies {
+    compile 'com.android.support:appcompat-v7:+'
+    compile 'com.android.support:support-v4:18.0.0'
+
+    compile 'io.socket:socket.io-client:0.2.1'
+}
+```
 
 [![Flattr this git repo](http://api.flattr.com/button/flattr-badge-large.png)](https://flattr.com/submit/auto?user_id=Gottox&url=https://github.com/Gottox/socket.io-java-client&title=socket.io-java-client&language=&tags=github&category=software)
 
