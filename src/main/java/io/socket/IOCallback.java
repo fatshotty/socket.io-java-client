@@ -24,8 +24,13 @@ public interface IOCallback {
 	 * On connect. Called when the socket becomes ready so it is now able to receive data
 	 */
 	void onConnect();
-	
-	/**
+
+    /**
+     * On reconnect. Called when the socket successfully reconnects
+     */
+    void onReconnect();
+
+    /**
 	 * On message. Called when the server sends String data.
 	 *
 	 * @param data the data.

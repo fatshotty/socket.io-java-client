@@ -8,6 +8,13 @@
  */
 package io.socket;
 
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParseException;
+import com.google.gson.JsonParser;
+import com.google.gson.JsonPrimitive;
+
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.MalformedURLException;
@@ -28,13 +35,6 @@ import java.util.logging.Logger;
 
 import javax.net.ssl.HttpsURLConnection;
 import javax.net.ssl.SSLContext;
-
-import com.google.gson.JsonArray;
-import com.google.gson.JsonElement;
-import com.google.gson.JsonObject;
-import com.google.gson.JsonParseException;
-import com.google.gson.JsonParser;
-import com.google.gson.JsonPrimitive;
 
 /**
  * The Class IOConnection.
@@ -570,6 +570,7 @@ class IOConnection implements IOCallback {
     if (reconnectTask != null) {
       reconnectTask.cancel();
       reconnectTask = null;
+      onReconnect();
     }
     resetTimeout();
     this.keepAliveInQueue = false;
@@ -956,16 +957,20 @@ class IOConnection implements IOCallback {
 
   @Override
   public void onDisconnect() {
-    SocketIO socket = sockets.get("");
-    if (socket != null)
-      socket.getCallback().onDisconnect();
+      for (SocketIO socket : sockets.values())
+          socket.getCallback().onDisconnect();
   }
 
   @Override
   public void onConnect() {
-    SocketIO socket = sockets.get("");
-    if (socket != null)
-      socket.getCallback().onConnect();
+      for (SocketIO socket : sockets.values())
+          socket.getCallback().onConnect();
+  }
+
+  @Override
+  public void onReconnect() {
+      for (SocketIO socket : sockets.values())
+          socket.getCallback().onReconnect();
   }
 
   @Override
