@@ -497,7 +497,13 @@ public abstract class AbstractTestSocketIO implements IOCallback {
 		events.add("onConnect");
 	}
 
-	/*
+    @Override
+    public void onReconnect() {
+        System.out.println("onReconnect");
+        events.add("onReconnect");
+    }
+
+    /*
 	 * (non-Javadoc)
 	 * 
 	 * @see io.socket.IOCallback#onMessage(java.lang.String,

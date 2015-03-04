@@ -8,6 +8,13 @@
  */
 package io.socket;
 
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParseException;
+import com.google.gson.JsonParser;
+import com.google.gson.JsonPrimitive;
+
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.MalformedURLException;
@@ -28,13 +35,6 @@ import java.util.logging.Logger;
 
 import javax.net.ssl.HttpsURLConnection;
 import javax.net.ssl.SSLContext;
-
-import com.google.gson.JsonArray;
-import com.google.gson.JsonElement;
-import com.google.gson.JsonObject;
-import com.google.gson.JsonParseException;
-import com.google.gson.JsonParser;
-import com.google.gson.JsonPrimitive;
 
 /**
  * The Class IOConnection.
@@ -129,7 +129,7 @@ class IOConnection implements IOCallback {
   private int nextId = 1;
 
   /** Acknowledges. */
-  HashMap<Integer, IOAcknowledge> acknowledge = new HashMap<Integer, IOAcknowledge>();
+  HashMap<Integer, AckEntry> acknowledge = new HashMap<Integer, AckEntry>();
 
   /** true if there's already a keepalive in {@link #outputBuffer}. */
   private boolean keepAliveInQueue;
@@ -382,6 +382,39 @@ class IOConnection implements IOCallback {
     };
   }
 
+  private static class AckEntry {
+    AckTimeoutTask ackTimeoutTask;
+    IOAcknowledge ack;
+  }
+	
+  /**
+   * The Class AckTimeoutTask. Handles timeouts on ACK
+   */
+  private class AckTimeoutTask extends TimerTask {
+
+    int ackId;
+    IOAcknowledgeWithTimeout ack;
+
+    AckTimeoutTask(int ackId, IOAcknowledgeWithTimeout ack) {
+      this.ackId = ackId;
+      this.ack = ack;
+    }
+
+    /*
+     * (non-Javadoc)
+     * 
+     * @see java.util.TimerTask#run()
+     */
+    @Override
+    public void run() {
+      synchronized (acknowledge) {
+        acknowledge.remove(ackId);	
+      }
+      logger.warning("! ack " + ackId + " timeout");
+      ack.timeout();
+    }
+  }
+
   /**
    * adds an {@link IOAcknowledge} to an {@link IOMessage}.
    * 
@@ -393,8 +426,20 @@ class IOConnection implements IOCallback {
   private void synthesizeAck(IOMessage message, IOAcknowledge ack) {
     if (ack != null) {
       int id = nextId++;
-      acknowledge.put(id, ack);
+      AckEntry entry = new AckEntry();
+      entry.ack = ack;
+      if (ack instanceof IOAcknowledgeWithTimeout) {
+        IOAcknowledgeWithTimeout timeoutAck = (IOAcknowledgeWithTimeout) ack;
+        entry.ackTimeoutTask = new AckTimeoutTask(id, timeoutAck);
+      }
       message.setId(id + "+");
+      synchronized (acknowledge) {
+        acknowledge.put(id, entry);
+      }
+      if (entry.ackTimeoutTask != null) {
+        long timeout = entry.ackTimeoutTask.ack.getTimeout();
+        backgroundTimer.schedule(entry.ackTimeoutTask, timeout);
+      }
     }
   }
 
@@ -525,6 +570,7 @@ class IOConnection implements IOCallback {
     if (reconnectTask != null) {
       reconnectTask.cancel();
       reconnectTask = null;
+      onReconnect();
     }
     resetTimeout();
     this.keepAliveInQueue = false;
@@ -696,17 +742,25 @@ class IOConnection implements IOCallback {
       if (data.length == 2) {
         try {
           int id = Integer.parseInt(data[0]);
-          IOAcknowledge ack = acknowledge.get(id);
-          if (ack == null)
-            logger.warning("Received unknown ack packet");
-          else {
+          AckEntry ackEntry = null;
+          synchronized (acknowledge) {
+            ackEntry = acknowledge.get(id);
+            if (ackEntry != null) {
+              ackEntry.ackTimeoutTask.cancel();
+              acknowledge.remove(id);
+            }
+          }
+          if (ackEntry != null) {
             JsonArray array = new JsonParser().parse(data[1]).getAsJsonArray();
             JsonElement[] args = new JsonElement[array.size()];
             for (int i = 0; i < args.length; i++) {
               args[i] = array.get(i);
             }
-            ack.ack(args);
+            ackEntry.ack.ack(args);
           }
+          else
+            logger.warning("Received unknown or timeouted ack packet");
+          
         } catch (NumberFormatException e) {
           logger.warning("Received malformated Acknowledge! This is potentially filling up the acknowledges!");
         } catch (JsonParseException e) {
@@ -903,16 +957,20 @@ class IOConnection implements IOCallback {
 
   @Override
   public void onDisconnect() {
-    SocketIO socket = sockets.get("");
-    if (socket != null)
-      socket.getCallback().onDisconnect();
+      for (SocketIO socket : sockets.values())
+          socket.getCallback().onDisconnect();
   }
 
   @Override
   public void onConnect() {
-    SocketIO socket = sockets.get("");
-    if (socket != null)
-      socket.getCallback().onConnect();
+      for (SocketIO socket : sockets.values())
+          socket.getCallback().onConnect();
+  }
+
+  @Override
+  public void onReconnect() {
+      for (SocketIO socket : sockets.values())
+          socket.getCallback().onReconnect();
   }
 
   @Override
